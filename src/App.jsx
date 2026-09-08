@@ -1,3 +1,4 @@
+import { supabase } from "./supabaseClient";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Hammer, Home, CalendarDays, Settings2, Users, Plus, Trash2, Check, Loader2,
@@ -78,68 +79,64 @@ export default function RemontTracker() {
   const remoteApply = useRef(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get(STORAGE_KEY, true);
-        if (res && res.value) setData(normalize(JSON.parse(res.value)));
-      } catch (e) {
-        // birinchi marta ochilyapti — standart holatdan boshlaymiz
-      } finally {
-        setLoaded(true);
-      }
-    })();
-  }, []);
+  (async () => {
+    try {
+      const { data: row } = await supabase.from('app_state').select('value').eq('key', STORAGE_KEY).maybeSingle();
+      if (row && row.value) setData(normalize(row.value));
+    } catch (e) {}
+    finally { setLoaded(true); }
+  })();
+}, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await window.storage.get(ROLE_KEY, false);
-        if (res && res.value) setRole(res.value);
-      } catch (e) {}
-      finally { setRoleLoaded(true); }
-    })();
-  }, []);
+  try {
+    const r = localStorage.getItem(ROLE_KEY);
+    if (r) setRole(r);
+  } catch (e) {}
+  finally { setRoleLoaded(true); }
+}, []);
 
-  const chooseRole = async (r) => {
-    setRole(r);
-    if (r === "editor") setTab("jurnal");
-    try { await window.storage.set(ROLE_KEY, r, false); } catch (e) {}
-  };
-  const switchRole = async () => {
-    setRole(null);
-    try { await window.storage.delete(ROLE_KEY, false); } catch (e) {}
-  };
+  const chooseRole = (r) => {
+  setRole(r);
+  if (r === "editor") setTab("jurnal");
+  try { localStorage.setItem(ROLE_KEY, r); } catch (e) {}
+};
 
+const switchRole = () => {
+  setRole(null);
+  try { localStorage.removeItem(ROLE_KEY); } catch (e) {}
+};
   useEffect(() => {
-    if (!loaded) return;
-    if (remoteApply.current) { remoteApply.current = false; return; }
-    setSaving(true);
-    const t = setTimeout(async () => {
-      try { await window.storage.set(STORAGE_KEY, JSON.stringify(data), true); }
-      catch (e) { console.error("Saqlashda xatolik", e); }
-      finally { setSaving(false); }
-    }, 500);
-    return () => clearTimeout(t);
-  }, [data, loaded]);
+  if (!loaded) return;
+  if (remoteApply.current) { remoteApply.current = false; return; }
+  setSaving(true);
+  const t = setTimeout(async () => {
+    try {
+      await supabase.from('app_state').upsert({ key: STORAGE_KEY, value: data, updated_at: new Date().toISOString() });
+    } catch (e) { console.error("Saqlashda xatolik", e); }
+    finally { setSaving(false); }
+  }, 500);
+  return () => clearTimeout(t);
+}, [data, loaded]);
 
   // boshqa telefonlardagi o'zgarishlarni davriy tekshirib turish
   useEffect(() => {
-    if (!loaded) return;
-    const interval = setInterval(async () => {
-      if (saving) return;
-      try {
-        const res = await window.storage.get(STORAGE_KEY, true);
-        if (res && res.value) {
-          const currentJSON = JSON.stringify(data);
-          if (res.value !== currentJSON) {
-            remoteApply.current = true;
-            setData(normalize(JSON.parse(res.value)));
-          }
+  if (!loaded) return;
+  const interval = setInterval(async () => {
+    if (saving) return;
+    try {
+      const { data: row } = await supabase.from('app_state').select('value').eq('key', STORAGE_KEY).maybeSingle();
+      if (row && row.value) {
+        const remoteJSON = JSON.stringify(row.value);
+        if (remoteJSON !== JSON.stringify(data)) {
+          remoteApply.current = true;
+          setData(normalize(row.value));
         }
-      } catch (e) {}
-    }, 6000);
-    return () => clearInterval(interval);
-  }, [loaded, data, saving]);
+      }
+    } catch (e) {}
+  }, 6000);
+  return () => clearInterval(interval);
+}, [loaded, data, saving]);
 
   useEffect(() => {
     const forDate = data.entries.filter((e) => e.date === selectedDate);

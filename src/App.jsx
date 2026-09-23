@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { isValidLoginId, loginIdToEmail, normalizeLoginId } from "./auth";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Hammer, Home, CalendarDays, Settings2, Users, Plus, Trash2, Check, Loader2,
@@ -30,11 +31,9 @@ const DEFAULT_DATA = {
   expenses: [], // {id, apartmentId, name, amount, category: 'ovqat'|'material', participantIds: []}
   payments: [], // {id, workerId, amount, date}
   quickCalc: { title: "", totalBudget: 0, rows: [] }, // {rows: [{id, name, days}]}
-  editPin: "1234",
 };
 
 const STORAGE_KEY = "remont-tracker-v2";
-const ROLE_KEY = "remont-tracker-role";
 
 function normalize(parsed) {
   const d = { ...DEFAULT_DATA, ...parsed };
@@ -69,74 +68,83 @@ function ProgressRing({ pct, size = 52 }) {
 
 export default function RemontTracker() {
   const [data, setData] = useState(DEFAULT_DATA);
+  const [session, setSession] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState("hisobot");
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const [draft, setDraft] = useState({});
-  const [role, setRole] = useState(null);
-  const [roleLoaded, setRoleLoaded] = useState(false);
   const remoteApply = useRef(false);
 
   useEffect(() => {
-  (async () => {
-    try {
-      const { data: row } = await supabase.from('app_state').select('value').eq('key', STORAGE_KEY).maybeSingle();
-      if (row && row.value) setData(normalize(row.value));
-    } catch (e) {}
-    finally { setLoaded(true); }
-  })();
-}, []);
+    let mounted = true;
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      if (mounted) { setSession(currentSession); setAuthReady(true); }
+    }).catch((error) => {
+      console.error("Sessionni yuklashda xatolik", error);
+      if (mounted) setAuthReady(true);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+      setSession(nextSession);
+      if (!nextSession) { setData(normalize(DEFAULT_DATA)); setLoaded(false); }
+    });
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
 
   useEffect(() => {
-  try {
-    const r = localStorage.getItem(ROLE_KEY);
-    if (r) setRole(r);
-  } catch (e) {}
-  finally { setRoleLoaded(true); }
-}, []);
-
-  const chooseRole = (r) => {
-  setRole(r);
-  if (r === "editor") setTab("jurnal");
-  try { localStorage.setItem(ROLE_KEY, r); } catch (e) {}
-};
-
-const switchRole = () => {
-  setRole(null);
-  try { localStorage.removeItem(ROLE_KEY); } catch (e) {}
-};
-  useEffect(() => {
-  if (!loaded) return;
-  if (remoteApply.current) { remoteApply.current = false; return; }
-  setSaving(true);
-  const t = setTimeout(async () => {
-    try {
-      await supabase.from('app_state').upsert({ key: STORAGE_KEY, value: data, updated_at: new Date().toISOString() });
-    } catch (e) { console.error("Saqlashda xatolik", e); }
-    finally { setSaving(false); }
-  }, 500);
-  return () => clearTimeout(t);
-}, [data, loaded]);
-
-  // boshqa telefonlardagi o'zgarishlarni davriy tekshirib turish
-  useEffect(() => {
-  if (!loaded) return;
-  const interval = setInterval(async () => {
-    if (saving) return;
-    try {
-      const { data: row } = await supabase.from('app_state').select('value').eq('key', STORAGE_KEY).maybeSingle();
-      if (row && row.value) {
-        const remoteJSON = JSON.stringify(row.value);
-        if (remoteJSON !== JSON.stringify(data)) {
-          remoteApply.current = true;
-          setData(normalize(row.value));
+    let cancelled = false;
+    if (!session?.user?.id) return () => { cancelled = true; };
+    setLoaded(false);
+    (async () => {
+      try {
+        const { data: row, error } = await supabase.from("user_app_state").select("data").eq("user_id", session.user.id).maybeSingle();
+        if (error) throw error;
+        let state = row?.data;
+        if (!state) {
+          const { data: legacyState, error: legacyError } = await supabase.rpc("claim_legacy_state");
+          if (legacyError) throw legacyError;
+          state = legacyState;
         }
-      }
-    } catch (e) {}
-  }, 6000);
-  return () => clearInterval(interval);
-}, [loaded, data, saving]);
+        if (!cancelled) setData(normalize(state || DEFAULT_DATA));
+      } catch (error) {
+        console.error("Ma'lumotlarni yuklashda xatolik", error);
+        if (!cancelled) setData(normalize(DEFAULT_DATA));
+      } finally { if (!cancelled) setLoaded(true); }
+    })();
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    if (!loaded || !session?.user?.id) return;
+    if (remoteApply.current) { remoteApply.current = false; return; }
+    setSaving(true);
+    const t = setTimeout(async () => {
+      try {
+        const { error } = await supabase.from("user_app_state").upsert({ user_id: session.user.id, data, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+        if (error) throw error;
+      } catch (error) { console.error("Saqlashda xatolik", error); }
+      finally { setSaving(false); }
+    }, 500);
+    return () => clearTimeout(t);
+  }, [data, loaded, session?.user?.id]);
+
+  useEffect(() => {
+    if (!loaded || !session?.user?.id) return;
+    const interval = setInterval(async () => {
+      if (saving) return;
+      try {
+        const { data: row, error } = await supabase.from("user_app_state").select("data").eq("user_id", session.user.id).maybeSingle();
+        if (error) throw error;
+        if (row?.data && JSON.stringify(row.data) !== JSON.stringify(data)) {
+          remoteApply.current = true;
+          setData(normalize(row.data));
+        }
+      } catch (error) { console.error("Yangilanishni tekshirishda xatolik", error); }
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [loaded, data, saving, session?.user?.id]);
 
   useEffect(() => {
     const forDate = data.entries.filter((e) => e.date === selectedDate);
@@ -217,7 +225,6 @@ const switchRole = () => {
 
   const addExpense = (expense) => setData((d) => ({ ...d, expenses: [...d.expenses, expense] }));
   const removeExpense = (id) => setData((d) => ({ ...d, expenses: d.expenses.filter((ex) => ex.id !== id) }));
-  const setEditPin = (pin) => setData((d) => ({ ...d, editPin: pin }));
 
   const addPayment = (payment) => setData((d) => ({ ...d, payments: [...d.payments, payment] }));
   const removePayment = (id) => setData((d) => ({ ...d, payments: d.payments.filter((p) => p.id !== id) }));
@@ -229,12 +236,14 @@ const switchRole = () => {
 
   const todayLogged = loggedDates.includes(todayISO());
 
-  if (!loaded || !roleLoaded) {
+  if (!authReady || (session && !loaded)) {
     return <div className="app-root center-loading"><Loader2 className="spin" size={26} /><style>{GLOBAL_CSS}</style></div>;
   }
-  if (!role) return <RoleGate data={data} chooseRole={chooseRole} />;
+  if (!session) return <AuthGate />;
 
-  const isEditor = role === "editor";
+  const isEditor = true;
+  const displayName = [session.user.user_metadata?.first_name, session.user.user_metadata?.last_name].filter(Boolean).join(" ") || session.user.user_metadata?.login_id || "Foydalanuvchi";
+  const handleLogout = () => supabase.auth.signOut();
 
   return (
     <div className="app-root">
@@ -249,10 +258,8 @@ const switchRole = () => {
           </div>
         </div>
         <div className="top-bar-right">
-          <span className={`role-pill ${isEditor ? "role-pill-editor" : "role-pill-viewer"}`}>
-            {isEditor ? <Lock size={11} /> : <Eye size={11} />} {isEditor ? "Tahrir" : "Kuzatuv"}
-          </span>
-          <button className="icon-round" onClick={switchRole} title="Rolni almashtirish"><LogOut size={14} /></button>
+          <span className="user-name" title={session.user.user_metadata?.login_id || ""}>{displayName}</span>
+          <button className="icon-round" onClick={handleLogout} title="Chiqish"><LogOut size={14} /></button>
         </div>
       </header>
 
@@ -273,7 +280,7 @@ const switchRole = () => {
           <HisobotTab data={data} report={report} workerTotals={workerTotals} activeApartments={activeApartments} addExpense={addExpense} removeExpense={removeExpense} toggleStage={toggleStage} addPayment={addPayment} removePayment={removePayment} isEditor={isEditor} />
         )}
         {tab === "sozlama" && isEditor && (
-          <SozlamaTab data={data} addWorker={addWorker} removeWorker={removeWorker} renameWorker={renameWorker} addApartment={addApartment} removeApartment={removeApartment} updateApartment={updateApartment} toggleArchive={toggleArchive} setEditPin={setEditPin} />
+          <SozlamaTab data={data} addWorker={addWorker} removeWorker={removeWorker} renameWorker={renameWorker} addApartment={addApartment} removeApartment={removeApartment} updateApartment={updateApartment} toggleArchive={toggleArchive} />
         )}
         {tab === "tezkor" && (
           <TezkorTab data={data} isEditor={isEditor} updateQuickCalc={updateQuickCalc} addQuickRow={addQuickRow} updateQuickRow={updateQuickRow} removeQuickRow={removeQuickRow} />
@@ -304,70 +311,47 @@ function BottomNav({ tab, setTab, isEditor }) {
   );
 }
 
-function RoleGate({ data, chooseRole }) {
-  const [pin, setPin] = useState("");
+function AuthGate() {
+  const [mode, setMode] = useState("login");
+  const [loginId, setLoginId] = useState("");
+  const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const submit = () => {
-    if (pin === data.editPin) chooseRole("editor");
-    else setError("PIN noto'g'ri");
+  const [message, setMessage] = useState("");
+  const submit = async (event) => {
+    event.preventDefault(); setError(""); setMessage("");
+    const normalized = normalizeLoginId(loginId);
+    if (!isValidLoginId(normalized)) { setError("Login ID 3–40 ta kichik harf, raqam, nuqta, tire yoki pastki chiziqdan iborat bo'lsin."); return; }
+    if (password.length < 6) { setError("Parol kamida 6 ta belgidan iborat bo'lsin."); return; }
+    if (mode === "register" && (!firstName.trim() || !lastName.trim())) { setError("Ism va familiyani kiriting."); return; }
+    setBusy(true);
+    try {
+      if (mode === "login") {
+        const { error: authError } = await supabase.auth.signInWithPassword({ email: loginIdToEmail(normalized), password });
+        if (authError) throw authError;
+      } else {
+        const { data: result, error: authError } = await supabase.auth.signUp({ email: loginIdToEmail(normalized), password, options: { data: { login_id: normalized, first_name: firstName.trim(), last_name: lastName.trim() } } });
+        if (authError) throw authError;
+        if (!result.session) setMessage("Ro'yxatdan o'tish yakunlandi. Agar Supabase email tasdig'ini yoqqan bo'lsa, administrator uni o'chirishi yoki test userni tasdiqlashi kerak.");
+      }
+    } catch (authError) { setError(authError.message || "Kirishda xatolik yuz berdi."); }
+    finally { setBusy(false); }
   };
   return (
-    <div className="app-root gate-root">
-      <style>{GLOBAL_CSS}</style>
-      <div className="gate-card">
-        <div className="top-icon gate-icon"><Hammer size={22} /></div>
-        <h1 className="gate-title">Ish jadvali</h1>
-        <p className="gate-sub">Ushbu havolani qaysi tarzda ochyapsiz?</p>
-        <button className="btn-primary gate-btn" onClick={() => chooseRole("viewer")}>
-          <Eye size={16} /> Kuzatuvchi sifatida (faqat ko'rish)
-        </button>
-        <TickDivider label="yoki" />
-        <div className="gate-editor-box">
-          <label className="gate-pin-label"><Lock size={13} /> Tahrirlovchi PIN</label>
-          <div className="gate-pin-row">
-            <input type="password" inputMode="numeric" placeholder="PIN" value={pin} onChange={(e) => { setPin(e.target.value); setError(""); }} />
-            <button className="btn-ghost gate-pin-submit" onClick={submit}>Kirish</button>
-          </div>
-          {error && <div className="gate-error">{error}</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MonthCalendar({ selectedDate, setSelectedDate, loggedDates }) {
-  const [viewMonth, setViewMonth] = useState(selectedDate.slice(0, 7));
-  const [y, m] = viewMonth.split("-").map(Number);
-  const startWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7;
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const loggedSet = new Set(loggedDates);
-  const cells = [...Array(startWeekday).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
-  const changeMonth = (delta) => {
-    let nm = m + delta, ny = y;
-    if (nm < 1) { nm = 12; ny--; } if (nm > 12) { nm = 1; ny++; }
-    setViewMonth(`${ny}-${String(nm).padStart(2, "0")}`);
-  };
-  return (
-    <div className="calendar">
-      <div className="calendar-head">
-        <button onClick={() => changeMonth(-1)}><ChevronLeft size={16} /></button>
-        <span>{MONTHS[m - 1]} {y}</span>
-        <button onClick={() => changeMonth(1)}><ChevronRight size={16} /></button>
-      </div>
-      <div className="calendar-weekdays">{WEEKDAYS.map((d) => <span key={d}>{d}</span>)}</div>
-      <div className="calendar-grid">
-        {cells.map((d, i) => {
-          if (d === null) return <span key={i} className="cal-empty" />;
-          const iso = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-          return (
-            <button key={i} className={`cal-day ${iso === selectedDate ? "cal-sel" : ""} ${iso === todayISO() ? "cal-today" : ""}`} onClick={() => setSelectedDate(iso)}>
-              {d}
-              {loggedSet.has(iso) && <span className="cal-dot" />}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <div className="app-root gate-root"><style>{GLOBAL_CSS}</style><div className="gate-card auth-card">
+      <div className="top-icon gate-icon"><Hammer size={22} /></div><h1 className="gate-title">Remont Hisob</h1>
+      <p className="gate-sub">{mode === "login" ? "Hisobingizga kiring" : "Yangi foydalanuvchi yarating"}</p>
+      <form className="auth-form" onSubmit={submit}>
+        {mode === "register" && <><input className="auth-field" placeholder="Ism" value={firstName} onChange={(e) => setFirstName(e.target.value)} autoComplete="given-name" /><input className="auth-field" placeholder="Familiya" value={lastName} onChange={(e) => setLastName(e.target.value)} autoComplete="family-name" /></>}
+        <input className="auth-field" placeholder="Login ID" value={loginId} onChange={(e) => setLoginId(e.target.value)} autoComplete="username" />
+        <input className="auth-field" type="password" placeholder="Parol" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "login" ? "current-password" : "new-password"} />
+        {error && <div className="gate-error">{error}</div>}{message && <div className="auth-message">{message}</div>}
+        <button className="btn-primary gate-btn" type="submit" disabled={busy}>{busy ? <Loader2 size={16} className="spin" /> : mode === "login" ? "Kirish" : "Ro'yxatdan o'tish"}</button>
+      </form>
+      <button className="auth-switch" type="button" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); setMessage(""); }}>{mode === "login" ? "Yangi hisob yaratish" : "Hisobim bor, kirish"}</button>
+    </div></div>
   );
 }
 
@@ -629,16 +613,7 @@ function PaymentsSection({ data, workerTotals, addPayment, removePayment, isEdit
   );
 }
 
-function SozlamaTab({ data, addWorker, removeWorker, renameWorker, addApartment, removeApartment, updateApartment, toggleArchive, setEditPin }) {
-  const [pinDraft, setPinDraft] = useState(data.editPin);
-  const [pinSaved, setPinSaved] = useState(false);
-  const savePin = () => {
-    if (!pinDraft.trim()) return;
-    setEditPin(pinDraft.trim());
-    setPinSaved(true);
-    setTimeout(() => setPinSaved(false), 1500);
-  };
-
+function SozlamaTab({ data, addWorker, removeWorker, renameWorker, addApartment, removeApartment, updateApartment, toggleArchive }) {
   return (
     <div className="pane">
       <section>
@@ -676,16 +651,6 @@ function SozlamaTab({ data, addWorker, removeWorker, renameWorker, addApartment,
         <button className="btn-ghost" onClick={addApartment}><Plus size={15} /> Kvartira qo'shish</button>
       </section>
 
-      <TickDivider />
-
-      <section>
-        <div className="section-head"><Lock size={16} /> <span>Tahrirlovchi PIN</span></div>
-        <p className="pin-note">Bu PIN'ni bilganlar hamma narsani o'zgartira oladi. Faqat kuzatib borishi kerak bo'lganlarga bermang.</p>
-        <div className="list-edit-row">
-          <input value={pinDraft} onChange={(e) => setPinDraft(e.target.value)} placeholder="PIN" />
-          <button className="btn-ghost pin-save-btn" onClick={savePin}>{pinSaved ? <Check size={15} /> : "Saqlash"}</button>
-        </div>
-      </section>
     </div>
   );
 }
@@ -936,6 +901,12 @@ const GLOBAL_CSS = `
 .bn-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; background: transparent; border: none; padding: 10px 4px; color: var(--text-muted); font-size: 10.5px; cursor: pointer; }
 .bn-active { color: var(--accent); font-weight: 700; }
 
+.auth-form { display: flex; flex-direction: column; gap: 9px; margin-top: 4px; }
+.auth-field { width: 100%; box-sizing: border-box; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); padding: 10px 11px; border-radius: 10px; font-size: 13px; }
+.auth-field:focus { outline: 2px solid rgba(15,118,110,0.18); border-color: var(--accent); }
+.auth-message { color: var(--accent); font-size: 11px; line-height: 1.4; text-align: left; }
+.auth-switch { background: transparent; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 8px 4px 0; }
+.user-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-muted); }
 .gate-root { display: flex; align-items: center; justify-content: center; }
 .gate-card { max-width: 340px; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 26px 20px; text-align: center; box-shadow: 0 10px 30px rgba(15,23,42,0.08); }
 .gate-icon { margin: 0 auto 12px; }

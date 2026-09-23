@@ -45,7 +45,9 @@ function normalize(parsed) {
   d.expenses = (d.expenses || []).map((ex) => ({ ...ex, category: ex.category || "ovqat" }));
   d.payments = d.payments || [];
   d.quickCalc = d.quickCalc && Array.isArray(d.quickCalc.rows) ? d.quickCalc : { title: "", totalBudget: 0, rows: [] };
-  return d;
+  const clean = { ...d };
+  delete clean.editPin;
+  return clean;
 }
 
 function TickDivider({ label }) {

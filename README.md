@@ -1,1 +1,30 @@
-# Remont Hisob\n\nMulti-user remont hisoboti va ish haqi kuzatuv ilovasi.\n\n## Lokal ishga tushirish\n\n1. Supabase loyihasida `supabase/migrations/202609230001_multi_user.sql` migrationini ishga tushiring.\n2. `.env.example` asosida `.env.local` yarating:\n\n   VITE_SUPABASE_URL=https://your-project.supabase.co\n   VITE_SUPABASE_ANON_KEY=your-anon-key\n\n3. `npm install` va `npm run build` buyrug‘ini bajaring.\n\n## Auth\n\nFoydalanuvchi ism, familiya, Login ID va parol bilan ro‘yxatdan o‘tadi. Login ID Supabase Auth uchun ichki synthetic emailga aylantiriladi; service-role key frontendga qo‘yilmaydi. Supabase Auth sozlamalarida email confirmation o‘chirilgan bo‘lishi kerak, chunki haqiqiy email manzili so‘ralmaydi.\n\n## Ma’lumot migrationi va xavfsizlik\n\n- Eski `app_state` va `remont_data` jadvallari o‘chirilmaydi.\n- `claim_legacy_state()` mavjud `remont-tracker-v2` qatorini faqat birinchi userning `user_app_state` qatoriga bir marta ko‘chiradi.\n- `profiles` va `user_app_state` RLS bilan himoyalangan; foydalanuvchi faqat o‘z qatorlarini ko‘radi.\n- Ishchilar, obyektlar, jurnal, full/half/rest kunlar, ish haqi, xarajatlar, to‘lovlar, qarzdorlik, leader ulushi, grafiklar va filterlar mavjud data modeli orqali saqlanadi.\n\n## Vercel\n\nVercel Production environment variables: `VITE_SUPABASE_URL` va `VITE_SUPABASE_ANON_KEY`. Build command: `npm run build`. Service-role keyni hech qachon `VITE_` prefiks bilan yoki frontend kodiga qo‘shmang.\n
+# Remont Hisob
+
+Multi-user remont hisoboti va ish haqi kuzatuv ilovasi.
+
+## Lokal ishga tushirish
+
+1. Supabase loyihasida `supabase/migrations/202609260001_telegram_integration.sql` migrationini ishga tushiring.
+2. `.env.example` dagi environment variables ni `.env` yoki Vercel/hosting environmentiga ko'chiring.
+3. `npm install` yoki `pnpm install` bilan bog'lanishlarni o'rnatib, `npm run build` orqali buildni tekshiring.
+4. Supabase Edge Function'larni deploy qiling:
+   - `supabase/functions/telegram-bot/index.ts`
+   - `supabase/functions/telegram-daily-reminder/index.ts`
+5. Telegram webhook URL ni `https://<project-ref>.supabase.co/functions/v1/telegram-bot` ga o'rnating va `x-telegram-bot-api-secret-token` headeriga `TELEGRAM_WEBHOOK_SECRET` ni kiritib, bot token bilan webhooksni sozlang.
+6. Botni admin panel yoki database orqali ON/OFF qilish mumkin. Bot faolligini `telegram_bot_settings` jadvalidan tekshiring.
+
+## Telegram integratsiyasi
+
+- Admin panelda botning ON/OFF holati boshqariladi.
+- `telegram_bot_settings` jadvali faollik, vaqt va timezone-ni saqlaydi.
+- `telegram_worker_links` jadvali Telegram chat ID va ishchi identifikatorini xavfsiz bog'laydi.
+- `telegram_link_tokens` uchun one-time link code ishlatiladi.
+- `telegram_daily_statuses` jadvali har bir ishchi uchun bir kunda bitta javobni saqlaydi.
+- `telegram_logs` barcha webhook/xatolik/duplikat holatlarini yozib turadi.
+- Timezone: `Asia/Tashkent`.
+
+## Muhim xotiralar
+
+- Secretlar va bot token kodga hardcode qilinmaydi.
+- Supabase mavjud ulanishi saqlanadi.
+- Mavjud Remont Hisob app logikasi va dizayni o'zgartirilmaydi.

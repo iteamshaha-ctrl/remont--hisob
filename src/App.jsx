@@ -749,8 +749,14 @@ function TelegramSection() {
 
   const load = async () => {
     setLoading(true);
-    const { data: s } = await supabase.from("telegram_bot_settings").select("morning_hour, reminder_end_hour").eq("id", 1).maybeSingle();
-    const { data: l } = await supabase.from("telegram_links").select("chat_id, worker_name, linked_at").order("linked_at");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoading(false); return; }
+    let { data: s } = await supabase.from("telegram_owner_settings").select("link_code, morning_hour, reminder_end_hour").eq("user_id", user.id).maybeSingle();
+    if (!s) {
+      const res = await supabase.from("telegram_owner_settings").insert({ user_id: user.id }).select("link_code, morning_hour, reminder_end_hour").single();
+      s = res.data;
+    }
+    const { data: l } = await supabase.from("telegram_links").select("chat_id, worker_name, linked_at").eq("user_id", user.id).order("linked_at");
     setSettings(s || null);
     setLinks(l || []);
     setLoading(false);
@@ -759,7 +765,8 @@ function TelegramSection() {
 
   const saveHour = async (field, value) => {
     setSettings((prev) => ({ ...prev, [field]: Number(value) }));
-    const { error } = await supabase.from("telegram_bot_settings").update({ [field]: Number(value), updated_at: new Date().toISOString() }).eq("id", 1);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from("telegram_owner_settings").update({ [field]: Number(value), updated_at: new Date().toISOString() }).eq("user_id", user.id);
     setMsg(error ? "Saqlashda xatolik" : "Saqlandi");
     setTimeout(() => setMsg(""), 2000);
   };
@@ -767,6 +774,11 @@ function TelegramSection() {
     if (!window.confirm("Bu ishchini botdan uzasizmi?")) return;
     await supabase.from("telegram_links").delete().eq("chat_id", chatId);
     load();
+  };
+  const inviteUrl = settings ? `https://t.me/remont_hisob_bot?start=${settings.link_code}` : "";
+  const copyInvite = async () => {
+    try { await navigator.clipboard.writeText(inviteUrl); setMsg("Havola nusxalandi"); } catch { setMsg(inviteUrl); }
+    setTimeout(() => setMsg(""), 2500);
   };
   const hours = Array.from({ length: 24 }, (_, h) => h);
 
@@ -776,13 +788,17 @@ function TelegramSection() {
       {loading ? (
         <div style={{ padding: 8 }}><Loader2 className="spin" size={18} /></div>
       ) : !settings ? (
-        <p style={{ fontSize: 13, opacity: 0.75 }}>Bot boshqa hisobga ulangan.</p>
+        <p style={{ fontSize: 13, opacity: 0.75 }}>Telegram bot sozlamasi yuklanmadi.</p>
       ) : (
         <>
-          <p style={{ fontSize: 13, opacity: 0.8, margin: "4px 0 10px" }}>
-            Ishchilar <a href="https://t.me/remont_hisob_bot" target="_blank" rel="noreferrer">@remont_hisob_bot</a> ga /start yozib, ismini yuboradi. Javoblar jurnalga o'zi yoziladi.
+          <p style={{ fontSize: 13, opacity: 0.8, margin: "4px 0 8px" }}>
+            Shu havolani ishchilaringizga yuboring. Ular havolani bosib, ismini yozadi. Javoblar sizning jurnalingizga yoziladi.
           </p>
-          <div className="list-edit">
+          <div className="list-edit-row" style={{ gap: 8 }}>
+            <a href={inviteUrl} target="_blank" rel="noreferrer" style={{ flex: 1, fontSize: 13, wordBreak: "break-all" }}>{inviteUrl}</a>
+            <button className="btn-ghost" onClick={copyInvite}>Nusxalash</button>
+          </div>
+          <div className="list-edit" style={{ marginTop: 8 }}>
             <div className="list-edit-row">
               <span style={{ flex: 1, fontSize: 14 }}>Ertalabki savol</span>
               <select value={settings.morning_hour} onChange={(e) => saveHour("morning_hour", e.target.value)}>

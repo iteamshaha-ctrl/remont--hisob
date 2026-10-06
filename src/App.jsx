@@ -734,7 +734,82 @@ function SozlamaTab({ data, addWorker, removeWorker, renameWorker, addApartment,
         <button className="btn-ghost" onClick={addApartment}><Plus size={15} /> Kvartira qo'shish</button>
       </section>
 
+      <TickDivider />
+
+      <TelegramSection />
     </div>
+  );
+}
+
+function TelegramSection() {
+  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState(null);
+  const [links, setLinks] = useState([]);
+  const [msg, setMsg] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    const { data: s } = await supabase.from("telegram_bot_settings").select("morning_hour, reminder_end_hour").eq("id", 1).maybeSingle();
+    const { data: l } = await supabase.from("telegram_links").select("chat_id, worker_name, linked_at").order("linked_at");
+    setSettings(s || null);
+    setLinks(l || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const saveHour = async (field, value) => {
+    setSettings((prev) => ({ ...prev, [field]: Number(value) }));
+    const { error } = await supabase.from("telegram_bot_settings").update({ [field]: Number(value), updated_at: new Date().toISOString() }).eq("id", 1);
+    setMsg(error ? "Saqlashda xatolik" : "Saqlandi");
+    setTimeout(() => setMsg(""), 2000);
+  };
+  const unlink = async (chatId) => {
+    if (!window.confirm("Bu ishchini botdan uzasizmi?")) return;
+    await supabase.from("telegram_links").delete().eq("chat_id", chatId);
+    load();
+  };
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+
+  return (
+    <section>
+      <div className="section-head"><Bell size={16} /> <span>Telegram bot</span></div>
+      {loading ? (
+        <div style={{ padding: 8 }}><Loader2 className="spin" size={18} /></div>
+      ) : !settings ? (
+        <p style={{ fontSize: 13, opacity: 0.75 }}>Bot boshqa hisobga ulangan.</p>
+      ) : (
+        <>
+          <p style={{ fontSize: 13, opacity: 0.8, margin: "4px 0 10px" }}>
+            Ishchilar <a href="https://t.me/remont_hisob_bot" target="_blank" rel="noreferrer">@remont_hisob_bot</a> ga /start yozib, ismini yuboradi. Javoblar jurnalga o'zi yoziladi.
+          </p>
+          <div className="list-edit">
+            <div className="list-edit-row">
+              <span style={{ flex: 1, fontSize: 14 }}>Ertalabki savol</span>
+              <select value={settings.morning_hour} onChange={(e) => saveHour("morning_hour", e.target.value)}>
+                {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+              </select>
+            </div>
+            <div className="list-edit-row">
+              <span style={{ flex: 1, fontSize: 14 }}>Eslatish oxiri</span>
+              <select value={settings.reminder_end_hour} onChange={(e) => saveHour("reminder_end_hour", e.target.value)}>
+                {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
+              </select>
+            </div>
+          </div>
+          {msg && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{msg}</div>}
+          <div style={{ fontSize: 13, fontWeight: 700, margin: "12px 0 6px" }}>Botga ulangan ishchilar ({links.length})</div>
+          <div className="list-edit">
+            {links.length === 0 && <p style={{ fontSize: 13, opacity: 0.7 }}>Hali hech kim ulanmagan.</p>}
+            {links.map((l) => (
+              <div className="list-edit-row" key={l.chat_id}>
+                <span style={{ flex: 1, fontSize: 14 }}>{l.worker_name}</span>
+                <button className="icon-btn danger" onClick={() => unlink(l.chat_id)}><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

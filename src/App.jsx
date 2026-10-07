@@ -5,6 +5,7 @@ import {
   Hammer, Home, CalendarDays, Settings2, Users, Plus, Trash2, Check, Loader2,
   Lock, Eye, LogOut, Bell, ChevronLeft, ChevronRight, Package, UtensilsCrossed,
   Wallet, Archive, ArchiveRestore, ListChecks, Calculator, Download, X,
+  Send, Copy, ExternalLink, Clock3, Link2, Unplug, AlertCircle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -783,46 +784,48 @@ function TelegramSection() {
   const hours = Array.from({ length: 24 }, (_, h) => h);
 
   return (
-    <section>
-      <div className="section-head"><Bell size={16} /> <span>Telegram bot</span></div>
+    <section className="tg-panel" aria-labelledby="tg-title" aria-busy={loading}>
+      <header className="tg-header">
+        <div className="tg-mark"><Send size={21} aria-hidden="true" /></div>
+        <div className="tg-heading"><h2 id="tg-title">Telegram bot</h2><span>@remont_hisob_bot</span></div>
+      </header>
       {loading ? (
-        <div style={{ padding: 8 }}><Loader2 className="spin" size={18} /></div>
+        <div className="tg-loading" role="status"><Loader2 className="spin" size={20} /><span>Sozlamalar yuklanmoqda…</span></div>
       ) : !settings ? (
-        <p style={{ fontSize: 13, opacity: 0.75 }}>Telegram bot sozlamasi yuklanmadi.</p>
+        <div className="tg-message tg-message-error" role="alert"><AlertCircle size={18} /><span>Telegram bot sozlamasi yuklanmadi.</span></div>
       ) : (
         <>
-          <p style={{ fontSize: 13, opacity: 0.8, margin: "4px 0 8px" }}>
-            Shu havolani ishchilaringizga yuboring. Ular havolani bosib, ismini yozadi. Javoblar sizning jurnalingizga yoziladi.
-          </p>
-          <div className="list-edit-row" style={{ gap: 8 }}>
-            <a href={inviteUrl} target="_blank" rel="noreferrer" style={{ flex: 1, fontSize: 13, wordBreak: "break-all" }}>{inviteUrl}</a>
-            <button className="btn-ghost" onClick={copyInvite}>Nusxalash</button>
-          </div>
-          <div className="list-edit" style={{ marginTop: 8 }}>
-            <div className="list-edit-row">
-              <span style={{ flex: 1, fontSize: 14 }}>Ertalabki savol</span>
-              <select value={settings.morning_hour} onChange={(e) => saveHour("morning_hour", e.target.value)}>
-                {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
-              </select>
+          <div className="tg-block tg-invite">
+            <div className="tg-block-head"><Link2 size={16} /><h3>Ulanish havolasi</h3></div>
+            <div className="tg-link-field">
+              <a className="tg-link" href={inviteUrl} target="_blank" rel="noreferrer">{inviteUrl}</a>
+              <button type="button" className="icon-btn tg-copy" onClick={copyInvite} title="Havolani nusxalash" aria-label="Havolani nusxalash"><Copy size={17} /></button>
             </div>
-            <div className="list-edit-row">
-              <span style={{ flex: 1, fontSize: 14 }}>Eslatish oxiri</span>
-              <select value={settings.reminder_end_hour} onChange={(e) => saveHour("reminder_end_hour", e.target.value)}>
-                {hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
-              </select>
+            <div className="tg-invite-footer"><span className="tg-code">Kod: <code>{settings.link_code}</code></span><a className="tg-open" href={inviteUrl} target="_blank" rel="noreferrer">Telegramda ochish <ExternalLink size={13} /></a></div>
+          </div>
+          <div className="tg-block">
+            <div className="tg-block-head"><Clock3 size={16} /><h3>Xabar vaqti</h3></div>
+            <div className="tg-schedule">
+              <label className="tg-time-row" htmlFor="tg-morning"><span>Ertalabki savol</span><select id="tg-morning" value={settings.morning_hour} onChange={(e) => saveHour("morning_hour", e.target.value)}>{hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}</select></label>
+              <label className="tg-time-row" htmlFor="tg-end"><span>Eslatish oxiri</span><select id="tg-end" value={settings.reminder_end_hour} onChange={(e) => saveHour("reminder_end_hour", e.target.value)}>{hours.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}</select></label>
             </div>
+            <div className="tg-schedule-note"><span>Har soatda eslatma</span><span>Almaty · UTC+5</span></div>
           </div>
-          {msg && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{msg}</div>}
-          <div style={{ fontSize: 13, fontWeight: 700, margin: "12px 0 6px" }}>Botga ulangan ishchilar ({links.length})</div>
-          <div className="list-edit">
-            {links.length === 0 && <p style={{ fontSize: 13, opacity: 0.7 }}>Hali hech kim ulanmagan.</p>}
-            {links.map((l) => (
-              <div className="list-edit-row" key={l.chat_id}>
-                <span style={{ flex: 1, fontSize: 14 }}>{l.worker_name}</span>
-                <button className="icon-btn danger" onClick={() => unlink(l.chat_id)}><Trash2 size={15} /></button>
-              </div>
-            ))}
+          <div className="tg-block">
+            <div className="tg-block-head"><Users size={16} /><h3>Ulangan ishchilar</h3><span className="tg-count">{links.length} ta</span></div>
+            {links.length === 0 ? (
+              <div className="tg-empty"><Users size={22} /><div><strong>Hali hech kim ulanmagan</strong><span className="tg-badge tg-badge-muted">Ulanmagan</span></div><a className="btn-ghost tg-connect" href={inviteUrl} target="_blank" rel="noreferrer"><Link2 size={14} /> Ulash</a></div>
+            ) : (
+              <div className="tg-workers">{links.map((l) => (
+                <div className="tg-worker" key={l.chat_id}>
+                  <span className="tg-avatar" aria-hidden="true">{(l.worker_name || "?").trim().slice(0, 1).toUpperCase()}</span>
+                  <div className="tg-worker-info"><span className="tg-worker-name">{l.worker_name}</span><span className="tg-badge"><Check size={11} /> Ulangan</span></div>
+                  <button type="button" className="icon-btn danger tg-unlink" onClick={() => unlink(l.chat_id)} title={`${l.worker_name}: botdan uzish`} aria-label={`${l.worker_name}: botdan uzish`}><Unplug size={16} /></button>
+                </div>
+              ))}</div>
+            )}
           </div>
+          {msg && <div className={`tg-message ${msg === "Saqlashda xatolik" ? "tg-message-error" : ""}`} role={msg === "Saqlashda xatolik" ? "alert" : "status"}>{msg === "Saqlashda xatolik" ? <AlertCircle size={16} /> : <Check size={16} />}<span>{msg}</span></div>}
         </>
       )}
     </section>
@@ -1183,5 +1186,54 @@ const GLOBAL_CSS = `
 .gate-btn { margin-top: 4px; }
 .auth-switch { font-size: 13px; font-weight: 600; padding: 12px 4px 0; }
 .gate-card .live-stats { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+
+/* Telegram presentation only: existing handlers and database requests are unchanged. */
+.tg-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
+.tg-panel svg { flex-shrink: 0; }
+.tg-header { display: flex; align-items: center; gap: 11px; padding: 18px 18px 14px; }
+.tg-mark { width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
+.tg-heading { min-width: 0; }
+.tg-heading h2 { margin: 0 0 4px; font: 700 18px 'Plus Jakarta Sans', sans-serif; letter-spacing: 0; }
+.tg-heading > span { font-size: 12px; color: var(--text-muted); }
+.tg-block { padding: 15px 18px; border-top: 1px solid var(--border); }
+.tg-invite { border-top: 0; padding-top: 0; }
+.tg-block-head { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; color: var(--text-muted); }
+.tg-block-head h3 { margin: 0; font: 700 13px 'Plus Jakarta Sans', sans-serif; color: var(--text); letter-spacing: 0; }
+.tg-link-field { display: flex; align-items: center; gap: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 5px 5px 5px 12px; }
+.tg-link { flex: 1; min-width: 0; color: var(--accent); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; text-decoration: none; }
+.tg-panel .tg-copy { width: 40px; height: 40px; min-width: 40px; border-radius: 8px; background: var(--surface); color: var(--accent); border: 1px solid var(--border); }
+.tg-invite-footer { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 9px; font-size: 11px; line-height: 1.6; }
+.tg-code { color: var(--text-muted); overflow-wrap: anywhere; min-width: 0; }
+.tg-code code { font: 11px 'JetBrains Mono', monospace; color: var(--text-muted); }
+.tg-open { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-weight: 600; text-decoration: none; padding: 3px 0; }
+.tg-schedule { display: flex; flex-direction: column; gap: 7px; }
+.tg-time-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 5px 5px 12px; background: var(--surface-2); border-radius: 10px; }
+.tg-time-row > span { font-size: 13px; font-weight: 500; min-width: 0; }
+.app-root .tg-time-row select { width: 106px; flex-shrink: 0; background-color: var(--surface); border: 1px solid var(--border); min-height: 42px; border-radius: 8px; padding-left: 11px; font-size: 16px; font-weight: 600; }
+.tg-schedule-note { display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; font-size: 10.5px; color: var(--text-muted); margin-top: 10px; line-height: 1.6; }
+.tg-count { margin-left: auto; color: var(--text-muted); background: var(--surface-2); padding: 3px 7px; border-radius: 6px; font-size: 10px; font-weight: 600; }
+.tg-workers { display: flex; flex-direction: column; }
+.tg-worker { display: flex; gap: 10px; align-items: center; min-height: 60px; padding: 8px 0; }
+.tg-worker + .tg-worker { border-top: 1px solid var(--border); }
+.tg-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-size: 13px; font-weight: 700; flex-shrink: 0; }
+.tg-worker-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+.tg-worker-name { font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.tg-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 5px; padding: 3px 6px; }
+.tg-badge-muted { color: var(--text-muted); background: var(--surface-2); }
+.tg-panel .tg-unlink { width: 40px; height: 40px; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-muted); }
+.tg-panel .tg-unlink:hover { background: var(--red-soft); color: var(--red); border-color: var(--red); }
+.tg-panel button { cursor: pointer; transition: background .15s, color .15s; }
+.tg-panel button:focus-visible, .tg-panel a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.tg-copy:hover, .tg-open:hover { background: var(--accent-soft); }
+.tg-empty { display: flex; align-items: center; gap: 9px; color: var(--text-muted); padding: 7px 0; }
+.tg-empty > div { flex: 1; min-width: 0; display: flex; align-items: flex-start; flex-direction: column; gap: 6px; }
+.tg-empty strong { font-size: 12px; font-weight: 500; line-height: 1.5; }
+.tg-panel .tg-connect { width: auto; min-height: 40px; padding: 0 11px; flex-shrink: 0; border: 1px solid var(--border); color: var(--accent); border-radius: 8px; text-decoration: none; font-size: 12px; }
+.tg-loading { display: flex; align-items: center; gap: 9px; padding: 24px 18px; color: var(--text-muted); font-size: 13px; }
+.tg-message { display: flex; align-items: center; gap: 7px; margin: 0 18px 16px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.tg-message-error { background: var(--red-soft); color: var(--red); }
+@media (max-width: 350px) { .tg-block { padding: 14px 12px; } .tg-header { padding: 16px 12px 14px; } .tg-invite { padding-top: 0; } .tg-time-row { padding-left: 9px; } .tg-empty { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { .tg-panel .spin { animation: none; } .tg-panel button { transition: none; } }
 
 `;
